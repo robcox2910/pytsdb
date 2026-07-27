@@ -83,12 +83,10 @@ class TimeSeries:
             The newly created :class:`DataPoint`.
 
         """
-        kwargs: dict[str, object] = {"value": value}
-        if timestamp is not None:
-            kwargs["timestamp"] = timestamp
-        if tags is not None:
-            kwargs["tags"] = tags
-        point = DataPoint(**kwargs)  # type: ignore[arg-type]
+        if timestamp is None:
+            point = DataPoint(value=value, tags=tags or {})
+        else:
+            point = DataPoint(timestamp=timestamp, value=value, tags=tags or {})
         self.add(point)
         return point
 

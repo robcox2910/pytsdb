@@ -51,6 +51,19 @@ class TestDataPointCreation:
         with pytest.raises(AttributeError):
             dp.value = 99.0  # type: ignore[misc]
 
+    def test_tags_are_copied(self) -> None:
+        """Editing the caller's dict must not change a frozen point."""
+        labels = {"sensor": "kitchen"}
+        dp = DataPoint(value=TEMP_KITCHEN, tags=labels)
+        labels["sensor"] = "garage"
+        labels["floor"] = "2"
+        assert dp.tags == {"sensor": "kitchen"}
+
+    def test_naive_timestamp_rejected(self) -> None:
+        """A timestamp without a timezone should raise a clear error."""
+        with pytest.raises(ValueError, match="timezone-aware"):
+            DataPoint(timestamp=datetime(YEAR_2024, MONTH_JULY, DAY_4))  # noqa: DTZ001
+
 
 class TestDataPointOrdering:
     """Test that data points sort by timestamp."""
