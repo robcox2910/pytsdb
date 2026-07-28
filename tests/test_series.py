@@ -55,6 +55,19 @@ class TestTimeSeriesBasics:
         assert dp.value == TEMP_MID
         assert len(series) == 1
 
+    def test_add_value_default_timestamp(self) -> None:
+        """Omitting the timestamp should stamp the point with the current UTC time."""
+        series = TimeSeries("temp")
+        dp = series.add_value(TEMP_MID)
+        assert dp.timestamp.tzinfo is not None
+        assert len(series) == 1
+
+    def test_add_value_rejects_naive_timestamp(self) -> None:
+        """A naive timestamp should be rejected with a clear error."""
+        series = TimeSeries("temp")
+        with pytest.raises(ValueError, match="timezone-aware"):
+            series.add_value(TEMP_MID, timestamp=datetime(YEAR_2024, MONTH_JULY, DAY_4))  # noqa: DTZ001
+
     def test_iteration(self) -> None:
         """Iterating should yield points in chronological order."""
         series = TimeSeries("temp")

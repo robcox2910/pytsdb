@@ -42,6 +42,28 @@ class DataPoint:
     value: float = 0.0
     tags: dict[str, str] = field(default_factory=lambda: {}, compare=False)
 
+    def __post_init__(self) -> None:
+        """Tidy up the note right after it's written.
+
+        Two bits of housekeeping happen here:
+
+        * We make sure the timestamp knows its timezone.  A bare
+          ``datetime(2024, 1, 1)`` has no timezone attached, which would
+          cause confusing crashes later when we compare times, so we
+          catch it early with a friendly message.
+        * We take our *own* copy of the tags.  Otherwise, if you kept the
+          dict you passed in and edited it, this "written in pen" point
+          would silently change too -- which it must never do.
+        """
+        if self.timestamp.tzinfo is None or self.timestamp.tzinfo.utcoffset(self.timestamp) is None:
+            msg = (
+                "timestamp must be timezone-aware -- add a timezone like "
+                "datetime(2024, 1, 1, tzinfo=timezone.utc). A naive "
+                "datetime (no timezone) was given."
+            )
+            raise ValueError(msg)
+        object.__setattr__(self, "tags", dict(self.tags))
+
     def matches_tags(self, filter_tags: dict[str, str]) -> bool:
         """Check whether this point's tags contain all *filter_tags*.
 

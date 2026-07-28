@@ -13,7 +13,11 @@ from pytsdb.errors import InvalidRetentionError
 
 
 class RetentionPolicy:
-    """A rule that expires data older than a given duration.
+    """A "spring cleaning" rule for old data.
+
+    Just like throwing out newspapers once they're more than a week old,
+    this rule quietly removes any data point older than ``max_age`` so your
+    database doesn't fill up with ancient readings.
 
     Attributes:
         max_age: How long to keep data (e.g. 30 days).

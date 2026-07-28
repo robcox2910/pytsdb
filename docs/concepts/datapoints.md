@@ -39,3 +39,24 @@ reading.matches_tags({"sensor": "garage"})   # False
 ## Fun Fact
 
 Data points in pytsdb are **frozen** (immutable) -- once created, you can't change them. This is like writing in pen instead of pencil. It keeps your data trustworthy!
+
+This even applies to the tags. When you create a data point, it takes its own private copy of the tags dictionary, so editing the dict you passed in later can't sneak in and change the point:
+
+```python
+labels = {"sensor": "kitchen"}
+reading = DataPoint(value=72.5, tags=labels)
+
+labels["sensor"] = "garage"   # edit the original dict
+print(reading.tags)           # {'sensor': 'kitchen'}  -- still in pen!
+```
+
+## Watch Out: Timestamps Need a Timezone
+
+A data point's timestamp must be **timezone-aware** so pytsdb always knows *which* clock you mean. A bare `datetime(2024, 1, 1)` has no timezone, so pytsdb raises a friendly error instead of letting it cause confusing crashes later:
+
+```python
+from datetime import datetime, timezone
+
+DataPoint(timestamp=datetime(2024, 1, 1))                       # ValueError!
+DataPoint(timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc))  # works
+```

@@ -17,7 +17,11 @@ from pytsdb.series import TimeSeries
 
 
 class TimeSeriesDB:
-    """An in-memory collection of named time series.
+    """A filing cabinet that holds many named time series.
+
+    Each drawer is a :class:`~pytsdb.series.TimeSeries` with its own name.
+    You can open a drawer to add readings, look things up, or throw out a
+    whole drawer you don't need any more. Everything lives in memory.
 
     Example:
         >>> db = TimeSeriesDB()
