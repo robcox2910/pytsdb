@@ -11,6 +11,7 @@ text editor and actually *see* your data!
 import json
 from pathlib import Path
 
+from pytsdb.atomic import atomic_write_text
 from pytsdb.database import TimeSeriesDB
 
 
@@ -25,7 +26,7 @@ def save(db: TimeSeriesDB, path: Path | str) -> None:
     file_path = Path(path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
     data = db.to_dict()
-    file_path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+    atomic_write_text(file_path, json.dumps(data, indent=2, default=str))
 
 
 def load(path: Path | str) -> TimeSeriesDB:
