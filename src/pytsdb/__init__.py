@@ -37,6 +37,7 @@ from pytsdb.errors import (
     EmptySeriesError,
     InvalidRetentionError,
     InvalidWindowError,
+    PersistenceError,
     PyTSDBError,
     SeriesNotFoundError,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "EmptySeriesError",
     "InvalidRetentionError",
     "InvalidWindowError",
+    "PersistenceError",
     "PyTSDBError",
     "RetentionPolicy",
     "SeriesNotFoundError",

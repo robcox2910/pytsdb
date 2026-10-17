@@ -10,9 +10,14 @@ text editor and actually *see* your data!
 
 import json
 from pathlib import Path
+from typing import cast
 
 from pytsdb.atomic import atomic_write_text
 from pytsdb.database import TimeSeriesDB
+from pytsdb.errors import PersistenceError
+
+# Every real save file has these top-level keys; anything else isn't one of ours.
+_REQUIRED_KEYS = frozenset({"series"})
 
 
 def save(db: TimeSeriesDB, path: Path | str) -> None:
@@ -39,14 +44,29 @@ def load(path: Path | str) -> TimeSeriesDB:
         A fully-loaded :class:`~pytsdb.database.TimeSeriesDB`.
 
     Raises:
-        FileNotFoundError: If the file doesn't exist.
+        PersistenceError: If the file is missing, unreadable, not valid JSON,
+            or not a valid save file.
 
     """
     file_path = Path(path)
-    raw = file_path.read_text(encoding="utf-8")
-    data: object = json.loads(raw)
+    try:
+        data: object = json.loads(file_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        msg = f"Could not read {file_path}: {exc}"
+        raise PersistenceError(msg) from exc
+    except json.JSONDecodeError as exc:
+        msg = f"Invalid JSON in {file_path}: {exc}"
+        raise PersistenceError(msg) from exc
     if not isinstance(data, dict):
-        msg = "Top-level JSON must be an object"
-        raise TypeError(msg)
-    db_data: dict[str, object] = {str(k): v for k, v in data.items()}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
-    return TimeSeriesDB.from_dict(db_data)
+        msg = f"{file_path} is not a valid save file: the top level must be an object"
+        raise PersistenceError(msg)
+    saved: dict[str, object] = {str(k): v for k, v in cast("dict[object, object]", data).items()}
+    missing = _REQUIRED_KEYS - saved.keys()
+    if missing:
+        msg = f"{file_path} is not a valid save file: missing {sorted(missing)}"
+        raise PersistenceError(msg)
+    try:
+        return TimeSeriesDB.from_dict(saved)
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        msg = f"{file_path} is not a valid save file: {exc}"
+        raise PersistenceError(msg) from exc

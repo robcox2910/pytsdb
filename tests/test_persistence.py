@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from pytsdb.database import TimeSeriesDB
+from pytsdb.errors import PersistenceError, PyTSDBError
 from pytsdb.persistence import load, save
 
 YEAR_2024 = 2024
@@ -53,15 +54,15 @@ class TestPersistence:
         assert nested.exists()
 
     def test_load_missing_file_raises(self, tmp_path: Path) -> None:
-        """Loading a non-existent file should raise FileNotFoundError."""
-        with pytest.raises(FileNotFoundError):
+        """Loading a non-existent file raises PersistenceError."""
+        with pytest.raises(PersistenceError):
             load(tmp_path / "nope.json")
 
     def test_load_bad_json_raises(self, tmp_path: Path) -> None:
         """Loading a file with non-object JSON should raise TypeError."""
         bad_file = tmp_path / "bad.json"
         bad_file.write_text("[]", encoding="utf-8")
-        with pytest.raises(TypeError, match="Top-level"):
+        with pytest.raises(PersistenceError, match="top level"):
             load(bad_file)
 
 
@@ -96,3 +97,30 @@ def test_interrupted_save_keeps_the_previous_file(
     assert path.read_bytes() == before
     load(path)
     assert [p.name for p in tmp_path.iterdir()] == ["data.json"]
+
+
+class TestUnreadableSaveFiles:
+    """A missing or damaged save file raises PersistenceError, naming the file."""
+
+    def test_missing_file_raises_persistence_error(self, tmp_path: Path) -> None:
+        """Loading a file that isn't there is a PersistenceError."""
+        with pytest.raises(PersistenceError, match=r"missing\.json"):
+            load(tmp_path / "missing.json")
+
+    def test_bad_json_raises_persistence_error_naming_the_file(self, tmp_path: Path) -> None:
+        """A scribbled-on file is a PersistenceError that names the file."""
+        path = tmp_path / "saved.json"
+        path.write_text("{not json", encoding="utf-8")
+        with pytest.raises(PersistenceError, match=r"saved\.json"):
+            load(path)
+
+    def test_wrong_shape_raises_persistence_error(self, tmp_path: Path) -> None:
+        """Valid JSON that isn't a saved database is a PersistenceError."""
+        path = tmp_path / "saved.json"
+        path.write_text('{"something": "else"}', encoding="utf-8")
+        with pytest.raises(PersistenceError, match=r"saved\.json"):
+            load(path)
+
+    def test_persistence_error_is_part_of_the_library_errors(self) -> None:
+        """PersistenceError belongs to the library's own family of errors."""
+        assert issubclass(PersistenceError, PyTSDBError)

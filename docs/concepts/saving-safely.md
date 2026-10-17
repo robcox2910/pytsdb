@@ -15,3 +15,11 @@ So saving works like a careful student copying out their homework:
 At every moment there's a complete file: the old one or the new one, never
 half of each. Real databases like SQLite and PostgreSQL use the same trick.
 The code lives in `atomic.py`.
+
+## When a Save File Is Damaged
+
+Loading is careful too. If the file is missing, isn't valid JSON, or isn't
+one of our save files at all, `load` raises a `PersistenceError`
+that names the file. It never quietly hands back an empty database -- that
+would be like a game starting a brand-new save and then overwriting your
+old one the next time you pressed "save".
