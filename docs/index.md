@@ -43,4 +43,4 @@ By exploring pytsdb you'll understand:
 5. How retention policies keep your database from growing forever
 6. How to save and load data with JSON serialization
 
-Ready? Head over to the [concepts](concepts/) folder to dive deeper!
+Ready? Head over to the [concepts](concepts/series.md) folder to dive deeper!
