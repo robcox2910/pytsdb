@@ -51,3 +51,12 @@ class InvalidRetentionError(PyTSDBError):
     Like saying "keep newspapers for zero days" --
     the retention period must be positive.
     """
+
+
+class PersistenceError(PyTSDBError):
+    """Raise when a saved database can't be read back from disk.
+
+    Like opening your saved game and finding the file missing or
+    scrambled -- rather than starting an empty game and pretending all is
+    well, we stop and say which file is the problem.
+    """
