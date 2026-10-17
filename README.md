@@ -58,6 +58,18 @@ save(db, "my_data.json")
 db2 = load("my_data.json")
 ```
 
+## Concepts
+
+See the [docs/](docs/) folder for kid-friendly explanations with real-world analogies:
+
+- [What is a Time-Series DB?](docs/index.md) -- weather station logbook analogy
+- [Data Points](docs/concepts/datapoints.md) -- thermometer readings
+- [Time Series](docs/concepts/series.md) -- a week of readings
+- [Queries](docs/concepts/queries.md) -- checking yesterday's weather
+- [Aggregation](docs/concepts/aggregation.md) -- weekly average temperature
+- [Downsampling](docs/concepts/downsampling.md) -- monthly summaries
+- [Retention](docs/concepts/retention.md) -- throwing away old newspapers
+
 <!-- docs:start -->
 ## Documentation
 
