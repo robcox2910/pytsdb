@@ -199,3 +199,13 @@ class TestJunkSaveFiles:
         )
         with pytest.raises(PersistenceError, match=r"db\.json"):
             load(path)
+
+    def test_nan_reading_raises_persistence_error(self, tmp_path: Path) -> None:
+        """A NaN reading in a save file is refused, just like one added by hand."""
+        path = tmp_path / "db.json"
+        point = '{"timestamp": "2024-07-04T10:00:00+00:00", "value": NaN}'
+        path.write_text(
+            '{"series": {"t": {"name": "t", "points": [' + point + "]}}}", encoding="utf-8"
+        )
+        with pytest.raises(PersistenceError, match=r"db\.json"):
+            load(path)

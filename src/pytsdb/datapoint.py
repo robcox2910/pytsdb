@@ -8,6 +8,7 @@ Imagine you're a scientist checking a thermometer.  You jot down:
 A ``DataPoint`` is exactly that note.
 """
 
+import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -23,8 +24,11 @@ class DataPoint:
 
     Attributes:
         timestamp: When the measurement was taken (UTC).
-        value: The numeric reading.
+        value: The numeric reading (any float except NaN).
         tags: Optional key-value labels (e.g. ``{"sensor": "kitchen"}``).
+
+    Raises:
+        ValueError: If *timestamp* has no timezone, or *value* is NaN.
 
     Example:
         >>> from datetime import datetime, timezone
@@ -45,12 +49,15 @@ class DataPoint:
     def __post_init__(self) -> None:
         """Tidy up the note right after it's written.
 
-        Two bits of housekeeping happen here:
+        Three bits of housekeeping happen here:
 
         * We make sure the timestamp knows its timezone.  A bare
           ``datetime(2024, 1, 1)`` has no timezone attached, which would
           cause confusing crashes later when we compare times, so we
           catch it early with a friendly message.
+        * We refuse a NaN ("not a number") value. NaN isn't bigger, smaller
+          or equal to anything -- not even itself -- so a NaN reading makes
+          "biggest", "smallest" and "in order" meaningless. Infinity is fine.
         * We take our *own* copy of the tags.  Otherwise, if you kept the
           dict you passed in and edited it, this "written in pen" point
           would silently change too -- which it must never do.
@@ -61,6 +68,9 @@ class DataPoint:
                 "datetime(2024, 1, 1, tzinfo=timezone.utc). A naive "
                 "datetime (no timezone) was given."
             )
+            raise ValueError(msg)
+        if math.isnan(self.value):
+            msg = "value must be a number, but NaN (not a number) was given"
             raise ValueError(msg)
         object.__setattr__(self, "tags", dict(self.tags))
 

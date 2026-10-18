@@ -24,8 +24,9 @@ def timestamps() -> st.SearchStrategy[datetime]:
 
 
 def readings() -> st.SearchStrategy[float]:
-    """Make any reading at all: negative, zero, huge, tiny, infinite or NaN ("not a number")."""
-    return st.floats()
+    """Make any reading DataPoint accepts: negative, zero, huge, tiny or infinite."""
+    # DataPoint refuses NaN ("not a number") with a ValueError: see its __post_init__.
+    return st.floats(allow_nan=False)
 
 
 def tag_sets() -> st.SearchStrategy[dict[str, str]]:

@@ -137,3 +137,17 @@ class TestDataPointSerialization:
                     "tags": "bad",
                 }
             )
+
+
+class TestNotANumber:
+    """Regression: a NaN reading broke the series' ordering, so it's refused."""
+
+    def test_nan_value_rejected(self) -> None:
+        """A NaN ("not a number") reading raises ValueError, like a naive timestamp."""
+        with pytest.raises(ValueError, match="NaN"):
+            DataPoint(timestamp=_make_ts(), value=float("nan"))
+
+    def test_infinite_values_allowed(self) -> None:
+        """Plus and minus infinity are still fine: they sort like any other number."""
+        assert DataPoint(timestamp=_make_ts(), value=float("inf")).value == float("inf")
+        assert DataPoint(timestamp=_make_ts(), value=float("-inf")).value == float("-inf")
