@@ -122,7 +122,7 @@ it: no buckets means a count of 0, and it fails straight away.
 | Each bucket counts and adds up exactly the readings from its start to just before the next | `test_each_bucket_holds_exactly_the_readings_in_its_window` |
 | Loading a saved database gives back the same series, readings, labels and retention rules | `test_save_then_load_gives_back_the_same_database` |
 | Whatever bytes are in the file, loading gives a database or a `PersistenceError`, never another error | `test_any_bytes_on_disk_load_or_raise_persistence_error` |
-| Whatever is in a save file's slots, loading gives a database or a `PersistenceError`, never another error | `test_damaged_save_file_load_or_raise_persistence_error` |
+| Whatever is in a save file's slots, loading gives a whole, working database or a `PersistenceError` | `test_damaged_save_file_load_or_raise_persistence_error` |
 
 ## Checking Against a Model
 
@@ -334,8 +334,10 @@ It wasn't the only one. The other properties also found that `load`
 crashed with the wrong error on a file that isn't text, on a reading
 with 400 digits and on a retention period of zero, and the model check
 found that retention crashed when asked to keep 2,000 years of readings
-in the year 2000. All are fixed, and each one is pinned as an example
-test.
+in the year 2000. A save file with two series of the same name used to
+load as one, and a retention rule for a series that isn't in the file
+loaded fine and crashed later; both are now refused. All are fixed, and
+each one is pinned as an example test.
 
 ## Run It Yourself
 

@@ -20,6 +20,7 @@ import json
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 from hypothesis import given
 from hypothesis import strategies as st
@@ -91,6 +92,18 @@ def any_json_leaf() -> st.SearchStrategy[object]:
     return st.one_of(st.none(), st.booleans(), st.integers(), st.floats(), st.text())
 
 
+def clashing_names() -> st.SearchStrategy[str]:
+    """Pick "a" or "b", so two series (or a series and a retention rule) often share a name."""
+    return st.sampled_from(["a", "b"])
+
+
+def keyed_by_position(entries: list[dict[str, object]]) -> dict[str, object]:
+    """Return the entries as a dict keyed "0", "1", ..., the way a save file nests series."""
+    # Made from a list, not st.dictionaries(), because Hypothesis almost
+    # never gives two dict values the same name, and a clash is the point.
+    return {str(position): entry for position, entry in enumerate(entries)}
+
+
 def damaged_save_files() -> st.SearchStrategy[dict[str, object]]:
     """Make something shaped like a save file, but with any value in any slot."""
     point = st.fixed_dictionaries(
@@ -98,13 +111,17 @@ def damaged_save_files() -> st.SearchStrategy[dict[str, object]]:
         optional={"value": any_json_leaf(), "tags": st.one_of(tag_sets(), any_json_leaf())},
     )
     series = st.fixed_dictionaries(
-        {"name": st.one_of(series_names(), any_json_leaf())},
+        {"name": st.one_of(clashing_names(), any_json_leaf())},
         optional={"points": st.one_of(st.lists(point, max_size=3), any_json_leaf())},
     )
-    policy = st.fixed_dictionaries({}, optional={"max_age_seconds": any_json_leaf()})
+    # Often a real number of seconds, so some files load and their rules get used.
+    sensible_or_not = st.one_of(st.integers(min_value=1, max_value=86_400), any_json_leaf())
+    policy = st.fixed_dictionaries({}, optional={"max_age_seconds": sensible_or_not})
     return st.fixed_dictionaries(
-        {"series": st.dictionaries(st.text(), series, max_size=2)},
-        optional={"retention": st.dictionaries(st.text(), policy, max_size=2)},
+        {"series": st.lists(series, max_size=3).map(keyed_by_position)},
+        optional={
+            "retention": st.dictionaries(st.one_of(clashing_names(), st.text()), policy, max_size=2)
+        },
     )
 
 
@@ -157,16 +174,16 @@ def counts_and_sums(
     return counts, sums
 
 
-def load_or_refuse(path: Path) -> None:
+def load_or_refuse(path: Path) -> TimeSeriesDB | None:
     """Load the database at ``path``, accepting only a PersistenceError refusal.
 
-    A PersistenceError is caught and ignored: refusing a bad file is fine. Any
-    *other* exception escapes and fails the test, and that is the whole check.
+    Returns the database, or None if loading raised PersistenceError: refusing
+    a bad file is fine. Any *other* exception escapes and fails the test.
     """
     try:
-        load(path)
+        return load(path)
     except PersistenceError:
-        return
+        return None
 
 
 # --- Downsampling: every reading lands in exactly one bucket ------------------
@@ -246,8 +263,14 @@ def test_any_bytes_on_disk_load_or_raise_persistence_error(junk: bytes) -> None:
 
 @given(document=damaged_save_files())
 def test_damaged_save_file_load_or_raise_persistence_error(document: dict[str, object]) -> None:
-    """Whatever is in a save file's slots, loading gives a database or a PersistenceError, never another error."""
+    """Whatever is in a save file's slots, loading gives a whole, working database or a PersistenceError."""
     with tempfile.TemporaryDirectory() as folder:
         path = Path(folder) / "db.json"
         path.write_text(json.dumps(document), encoding="utf-8")
-        load_or_refuse(path)
+        loaded = load_or_refuse(path)
+    if loaded is not None:
+        # A file that loads must load whole: one series for every series in
+        # the file (none lost to a clash of names), and every retention rule
+        # belongs to a series, so applying them all works.
+        assert loaded.series_count == len(cast("dict[str, object]", document["series"]))
+        loaded.apply_retention(now=FIRST_MOMENT)
