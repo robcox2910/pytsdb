@@ -18,6 +18,11 @@ def _utc_now() -> datetime:
     return datetime.now(tz=UTC)
 
 
+def _is_real_number(value: object) -> bool:
+    """Return whether *value* is an int or float (a bool is not a reading)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 @dataclass(frozen=True, slots=True, order=True)
 class DataPoint:
     """A single timestamped value with optional tags.
@@ -28,7 +33,8 @@ class DataPoint:
         tags: Optional key-value labels (e.g. ``{"sensor": "kitchen"}``).
 
     Raises:
-        ValueError: If *timestamp* has no timezone, or *value* is NaN.
+        ValueError: If *timestamp* has no timezone, or *value* is not a
+            real number (a string, ``None`` or a bool, say) or is NaN.
 
     Example:
         >>> from datetime import datetime, timezone
@@ -49,12 +55,14 @@ class DataPoint:
     def __post_init__(self) -> None:
         """Tidy up the note right after it's written.
 
-        Three bits of housekeeping happen here:
+        Four bits of housekeeping happen here:
 
         * We make sure the timestamp knows its timezone.  A bare
           ``datetime(2024, 1, 1)`` has no timezone attached, which would
           cause confusing crashes later when we compare times, so we
           catch it early with a friendly message.
+        * We refuse a value that isn't a real number at all (``"x"``,
+          ``None``, ``True``) with a clear message.
         * We refuse a NaN ("not a number") value. NaN isn't bigger, smaller
           or equal to anything -- not even itself -- so a NaN reading makes
           "biggest", "smallest" and "in order" meaningless. Infinity is fine.
@@ -68,6 +76,9 @@ class DataPoint:
                 "datetime(2024, 1, 1, tzinfo=timezone.utc). A naive "
                 "datetime (no timezone) was given."
             )
+            raise ValueError(msg)
+        if not _is_real_number(self.value):
+            msg = f"value must be a number (int or float), but {self.value!r} was given"
             raise ValueError(msg)
         if math.isnan(self.value):
             msg = "value must be a number, but NaN (not a number) was given"
