@@ -180,3 +180,22 @@ class TestJunkSaveFiles:
         )
         with pytest.raises(PersistenceError, match=r"db\.json"):
             load(path)
+
+    def test_retention_for_a_missing_series_raises_persistence_error(self, tmp_path: Path) -> None:
+        """A retention rule for a series not in the file used to load, then crash apply_retention."""
+        path = tmp_path / "db.json"
+        path.write_text(
+            '{"series": {}, "retention": {"": {"max_age_seconds": 1.0}}}', encoding="utf-8"
+        )
+        with pytest.raises(PersistenceError, match=r"db\.json"):
+            load(path)
+
+    def test_two_series_with_the_same_name_raise_persistence_error(self, tmp_path: Path) -> None:
+        """Two series saved under one name used to load as one, losing the other's readings."""
+        path = tmp_path / "db.json"
+        path.write_text(
+            '{"series": {"a": {"name": "t", "points": []}, "b": {"name": "t", "points": []}}}',
+            encoding="utf-8",
+        )
+        with pytest.raises(PersistenceError, match=r"db\.json"):
+            load(path)
