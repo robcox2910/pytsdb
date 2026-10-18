@@ -112,14 +112,16 @@ It only needs a rule that's always true.
 Its partner, `test_each_bucket_holds_exactly_the_readings_in_its_window`,
 checks each bucket on its own against a plain `sorted()` list: the bucket
 starting at 9:00 must count and add up exactly the readings from 9:00 up
-to (but not including) the next bucket. **A do-nothing `downsample` that
+to (but not including) the next bucket, and every bucket must start a
+whole number of windows after midnight on 1 January 1970, as
+`aggregate` promises. **A do-nothing `downsample` that
 returns no buckets at all passes that one**, because with no buckets
 there's nothing to check. That's why the counts-and-sums rule sits beside
 it: no buckets means a count of 0, and it fails straight away.
 
 | Rule | Test |
 |---|---|
-| Each bucket counts and adds up exactly the readings from its start to just before the next | `test_each_bucket_holds_exactly_the_readings_in_its_window` |
+| Each bucket starts a whole number of windows after 1970 and holds exactly the readings up to the next | `test_each_bucket_holds_exactly_the_readings_in_its_window` |
 | Loading a saved database gives back the same series, readings, labels and retention rules | `test_save_then_load_gives_back_the_same_database` |
 | Whatever bytes are in the file, loading gives a database or a `PersistenceError`, never another error | `test_any_bytes_on_disk_load_or_raise_persistence_error` |
 | Whatever is in a save file's slots, loading gives a whole, working database or a `PersistenceError` | `test_damaged_save_file_load_or_raise_persistence_error` |
@@ -132,17 +134,15 @@ readings, delete the series. Bugs often hide in the *order* of steps.
 
 So the auditor has a second trick. They keep their own notebook, written
 the simplest way possible: every reading just goes on the end of a list,
-in the order it arrived, never sorted. After every step at the weather
-station, they compare the database with the notebook. If the two ever
-disagree, something's wrong with the database.
+in the order it arrived. After every step at the weather station, they
+compare the database with the notebook. If the two ever disagree,
+something's wrong with the database.
 
 That notebook is a **model**: something simple that we already trust.
 Here's part of the check in `tests/test_model.py`:
 
 ```python
 class TimeSeriesDBMachine(RuleBasedStateMachine):
-    """Play random steps on a TimeSeriesDB and on a dict of unsorted lists side by side."""
-
     seen = Bundle("seen")
 
     def __init__(self) -> None:
@@ -154,11 +154,14 @@ class TimeSeriesDBMachine(RuleBasedStateMachine):
 
     @rule(target=seen, name=some_names(), batch=batches_of_readings())
     def add_readings(self, name: str, batch: list[Reading]) -> MultipleResults[datetime]:
-        """Add a few readings from any moments, in any order; the notebook adds them to its end."""
+        """Add a few readings, in any order; the notebook adds them to its end."""
         for timestamp, value, tags in batch:
+            handed_in = dict(tags)
             if name in self.model:
-                self.db.add_point(name, value=value, timestamp=timestamp, tags=tags)
-                self.model[name].append((timestamp, value, tags))
+                added = self.db.add_point(name, value=value, timestamp=timestamp, tags=handed_in)
+                self.model[name].append((timestamp, value, dict(tags)))
+                handed_in["scribble"] = "!"
+                added.tags["scribble"] = "!"
         return multiple(*(timestamp for timestamp, _, _ in batch))
 
     @rule(now=moments())
@@ -174,10 +177,9 @@ class TimeSeriesDBMachine(RuleBasedStateMachine):
     @invariant()
     def same_series_and_readings(self) -> None:
         """After every step, the database holds exactly the notebook's series and readings."""
-        assert self.db.list_series() == sorted(self.model)
-        for name, expected in self.model.items():
-            assert same_readings_in_time_order(as_readings(self.db.query(name)), expected)
-
+        for name, notebook in self.model.items():
+            expected = oldest_first(notebook)
+            assert same(as_readings(self.db.query(name)), expected)
 
 TestTimeSeriesDBModel = cast("type[unittest.TestCase]", TimeSeriesDBMachine.TestCase)
 ```
@@ -191,10 +193,14 @@ Piece by piece:
   notebook is a plain dict: one unsorted list of readings per series,
   plus each series' retention rule in `self.max_ages`.
 - **Each `@rule`** is one kind of step. It does the same thing to the
-  database and the notebook. The real file has rules to make and delete
-  series (including names that are taken or missing, which must raise
-  the right error -- `add_readings` checks that too), add readings, query a time range, set retention
-  rules and apply them. Every story starts with a `temperature` series
+  database and the notebook. `add_readings` also scribbles on the labels
+  it handed in and on the point it got back: if the database had kept
+  either dict, the next check would see the scribble. The real file has
+  rules to make and delete series, query by time and by label, work out
+  the rate of change, count and find the biggest reading per window, set
+  retention rules and apply them, and scribble on everything a read
+  hands back. Asking for a series that isn't there must raise
+  `SeriesNotFoundError`. Every story starts with a `temperature` series
   holding a few readings, so there's always something to ask about.
 - **`seen = Bundle("seen")`** is a bag of moments that readings were
   taken at. `add_readings` puts its timestamps in the bag
@@ -209,19 +215,21 @@ Piece by piece:
   checks the answer that `apply_retention` *returns* (how many readings
   it threw out), not just what's left.
 - **The `@invariant()`** runs after every single step and compares
-  everything: which series exist, and every reading in each one.
-  `same_readings_in_time_order` checks that the database gives back
-  exactly the notebook's readings, oldest first.
+  everything: here, every reading in each series. `oldest_first` puts
+  the notebook in time order with Python's `sorted()`, which never swaps
+  two readings from the same moment, and `same` compares the two answers
+  exactly, labels and all. The real file also checks which series exist,
+  `first`, `last` and looping over a series.
 - **`TestTimeSeriesDBModel = ...TestCase`** turns the machine into a test
   that pytest can find and run. One run plays 100 random stories, each
   up to 20 steps long.
 
 The notebook is a good model because it's obviously right and it's
-*not* PyTSDB's code. The database keeps its readings sorted and finds
-time ranges with a binary search; the notebook never sorts anything, and
-answers every question by looking at every reading. If we built the
-model by copying the database, any bug would be in both, and they'd
-agree perfectly about the wrong answer.
+*not* PyTSDB's code. The database keeps its readings in order as they
+arrive and finds time ranges with a binary search; the notebook just
+writes things down and answers every question by looking at every
+reading. If we built the model by copying the database, any bug would be
+in both, and they'd agree perfectly about the wrong answer.
 
 ## Try It Yourself
 
@@ -269,8 +277,9 @@ down to **two readings**: both at midnight on 1 January 2000, both
 `0.0`. Two readings went in, the summary said 1. Two thermometers
 showing the same temperature at the same time were counted as one.
 
-Both downsampling properties catch it. The save/load, junk-file and
-model checks stay green, because they never count anything.
+Both downsampling properties catch it. The save/load and junk-file
+properties stay green, because they never count anything. The model
+check counts too, but its 100 stories happen to miss this one.
 
 The example tests all still pass. Only the property notices. Every
 example in `tests/test_aggregation.py` uses four *different* readings,
@@ -292,52 +301,68 @@ When we first wrote
 PyTSDB's real code -- no deliberate bug needed:
 
 ```
-E           assert 1.0 == 0
-E            +  where 1.0 = DataPoint(timestamp=datetime.datetime(2000, 1, 1, 0, 0, tzinfo=datetime.timezone.utc), value=1.0, tags={}).value
-E           Failing test case: test_each_bucket_holds_exactly_the_readings_in_its_window(
-E               logbook=[(
-E                    datetime.datetime(2000, 1, 1, 0, 0, 0, 1, tzinfo=datetime.timezone.utc),
-E                    0.0,  # or any other generated value
-E                )],
-E               window=datetime.timedelta(microseconds=1),
-E           )
+    assert count.value == len(inside)
+AssertionError: assert 1.0 == 0
+ +  where 1.0 = DataPoint(timestamp=datetime.datetime(1999, 12, 31, 23, 59, 59, 999875, tzinfo=datetime.timezone.utc), value=1.0, tags={}).value
+ +  and   0 = len([])
+Failing test case: test_each_bucket_holds_exactly_the_readings_in_its_window(
+    logbook=[(
+         datetime.datetime(2000, 1, 1, 0, 0, tzinfo=datetime.timezone.utc),
+         0.0,  # or any other generated value
+     )],
+    window=datetime.timedelta(microseconds=125),
+)
 ```
 
-One reading, taken one microsecond after midnight on 1 January 2000,
-summarised into one-microsecond buckets. The bucket should start at
-00:00:00.000001, exactly when the reading was taken. Instead it was
-labelled 00:00:00 -- so the bucket ran from midnight to one microsecond
-past, and *ended before its own reading*.
+One reading, at the stroke of midnight on 1 January 2000, summarised
+into 125-microsecond buckets. Its bucket should start at midnight.
+Instead it was labelled 23:59:59.999875, the year before, so the bucket
+*ended* at midnight, just before its own reading.
 
-Here's why. The old code turned the time into a count of seconds,
-stored as a float: `946684800.000001`. A float only has room for about
-16 digits, and that number needs 16 with nothing to spare, so it was
-stored as very slightly *less*. Dividing by the window and rounding down
-then landed one bucket too early.
+Here's why. The old code counted windows in float seconds. Midnight is
+946,684,800 seconds after 1970, which is fine, but 0.000125 can't be
+stored exactly as a float: it's kept a hair *bigger*. So the division
+comes out a hair under the whole number 7,573,478,400,000, and rounding
+down (`//`) lands one bucket too early.
 
-The example tests used tidy hourly windows and readings on the hour,
-where the rounding never shows. The auditor tried a one-microsecond
-window, which is exactly where it does.
+The example tests used tidy hourly windows, where the rounding never
+shows. The auditor tried a 125-microsecond window, which is exactly
+where it does.
 
 The fix was to stop using floats. Python's `timedelta` counts whole
-microseconds exactly, and you can divide one by another:
+microseconds exactly, and you can divide one by another. Before:
 
 ```python
-    windows_since_epoch = (timestamp - epoch) // window  # was: total_seconds // window_seconds
+    bucket_start = int(total_seconds // window_seconds) * window_seconds
+    return epoch + timedelta(seconds=bucket_start)
 ```
 
-The shrunk input became an ordinary example test,
-`test_reading_on_a_bucket_boundary_starts_its_own_bucket` in
-`tests/test_downsampling.py`, so this bug can never sneak back in.
+After (the `try` is there for the year-1 limit):
 
-It wasn't the only one. The other properties also found that `load`
-crashed with the wrong error on a file that isn't text, on a reading
-with 400 digits and on a retention period of zero, and the model check
-found that retention crashed when asked to keep 2,000 years of readings
-in the year 2000. A save file with two series of the same name used to
-load as one, and a retention rule for a series that isn't in the file
-loaded fine and crashed later; both are now refused. All are fixed, and
-each one is pinned as an example test.
+```python
+    windows_since_epoch = (timestamp - epoch) // window
+    try:
+        return epoch + windows_since_epoch * window
+```
+
+The shrunk input became an ordinary example test in
+`tests/test_downsampling.py`, so this bug can never sneak back in:
+
+```python
+def test_reading_on_a_bucket_boundary_starts_its_own_bucket() -> None:
+    midnight = datetime(2000, 1, 1, tzinfo=UTC)
+    result = downsample(
+        [DataPoint(timestamp=midnight, value=VALUE_10)], target_interval=timedelta(microseconds=125)
+    )
+    assert [bucket.timestamp for bucket in result] == [midnight]
+```
+
+It wasn't the only one. The properties and the model check also found
+that `load` crashed with the wrong error on damaged files, that a save
+file could hold two series with one name, that retention crashed when
+asked to keep 2,000 years of readings, that tags handed back by `query`
+could be edited to change the database, and that a NaN reading jumbled
+the order of readings. All are fixed and pinned as example tests.
 
 ## Run It Yourself
 
