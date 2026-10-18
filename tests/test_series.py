@@ -146,3 +146,12 @@ class TestTimeSeriesSerialization:
         """Raise TypeError if a point entry is not a dict."""
         with pytest.raises(TypeError, match="each point"):
             TimeSeries.from_dict({"name": "temp", "points": ["bad"]})
+
+
+def test_readings_at_the_same_moment_stay_in_arrival_order() -> None:
+    """Regression: same-moment readings used to be sorted by value, not kept as they came."""
+    series = TimeSeries("temp")
+    series.add_value(TEMP_HIGH, timestamp=_ts(HOUR_10))
+    series.add_value(TEMP_LOW, timestamp=_ts(HOUR_10))
+    series.add_value(TEMP_MID, timestamp=_ts(HOUR_10))
+    assert [point.value for point in series] == [TEMP_HIGH, TEMP_LOW, TEMP_MID]

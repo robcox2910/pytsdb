@@ -59,11 +59,21 @@ class RetentionPolicy:
         """
         if now is None:
             now = datetime.now(tz=UTC)
-        cutoff = now - self.max_age
+        try:
+            cutoff = now - self.max_age
+        except OverflowError:
+            # The cutoff is before year 1, where the calendar (and datetime)
+            # begins, so no reading can be that old: keep them all.
+            return list(points)
         return [p for p in points if p.timestamp >= cutoff]
 
     def to_dict(self) -> dict[str, object]:
         """Serialize this policy to a plain dictionary.
+
+        The age is written as seconds in a float, which holds every
+        microsecond exactly only up to 2**33 seconds (about 272 years).
+        A longer retention period may come back from :meth:`from_dict` a
+        microsecond or two different.
 
         Returns:
             A dict with ``max_age_seconds``.

@@ -244,3 +244,34 @@ class TestDatabaseSerialization:
         """Raise TypeError if retention is not a dict."""
         with pytest.raises(TypeError, match="retention"):
             TimeSeriesDB.from_dict({"series": {}, "retention": "bad"})
+
+
+class TestNoSharedTags:
+    """Regressions: tags handed out by the database used to be its own stored dicts."""
+
+    def test_editing_a_queried_points_tags_leaves_the_database_alone(self) -> None:
+        """Scribbling on the tags of a point from query() doesn't change what's stored."""
+        db = TimeSeriesDB()
+        db.create_series("t")
+        db.add_point("t", value=TEMP_LOW, timestamp=_ts(10), tags={"room": "kitchen"})
+        db.query("t")[0].tags["room"] = "hall"
+        assert db.query("t")[0].tags == {"room": "kitchen"}
+
+    def test_editing_the_added_points_tags_leaves_the_database_alone(self) -> None:
+        """Scribbling on the tags of the point add_point() returns doesn't change what's stored."""
+        db = TimeSeriesDB()
+        db.create_series("t")
+        added = db.add_point("t", value=TEMP_LOW, timestamp=_ts(10), tags={"room": "kitchen"})
+        added.tags["room"] = "hall"
+        assert db.query("t")[0].tags == {"room": "kitchen"}
+
+    def test_editing_series_reads_leaves_the_series_alone(self) -> None:
+        """first, last, iterating and points all hand out copies too."""
+        db = TimeSeriesDB()
+        series = db.create_series("t")
+        series.add_value(TEMP_LOW, timestamp=_ts(10), tags={"room": "kitchen"})
+        series.first.tags["a"] = "1"
+        series.last.tags["b"] = "2"
+        next(iter(series)).tags["c"] = "3"
+        series.points[0].tags["d"] = "4"
+        assert db.query("t")[0].tags == {"room": "kitchen"}

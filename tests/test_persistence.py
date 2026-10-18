@@ -124,3 +124,88 @@ class TestUnreadableSaveFiles:
     def test_persistence_error_is_part_of_the_library_errors(self) -> None:
         """PersistenceError belongs to the library's own family of errors."""
         assert issubclass(PersistenceError, PyTSDBError)
+
+
+class TestJunkSaveFiles:
+    """Regressions: files the property tests found that escaped as other errors."""
+
+    def test_bytes_that_are_not_text_raise_persistence_error(self, tmp_path: Path) -> None:
+        """A file that isn't UTF-8 text used to escape as UnicodeDecodeError."""
+        path = tmp_path / "db.json"
+        path.write_bytes(b"\x80")
+        with pytest.raises(PersistenceError, match=r"db\.json"):
+            load(path)
+
+    def test_number_too_long_to_read_raises_persistence_error(self, tmp_path: Path) -> None:
+        """A 5,000-digit number used to escape as a plain ValueError."""
+        path = tmp_path / "db.json"
+        path.write_text("1" * 5000, encoding="utf-8")
+        with pytest.raises(PersistenceError, match=r"db\.json"):
+            load(path)
+
+    def test_nesting_too_deep_raises_persistence_error(self, tmp_path: Path) -> None:
+        """100,000 opening brackets used to escape as RecursionError."""
+        path = tmp_path / "db.json"
+        path.write_text("[" * 100_000, encoding="utf-8")
+        with pytest.raises(PersistenceError, match=r"db\.json"):
+            load(path)
+
+    def test_retention_too_long_for_timedelta_raises_persistence_error(
+        self, tmp_path: Path
+    ) -> None:
+        """A retention period past timedelta's limit used to escape as OverflowError."""
+        path = tmp_path / "db.json"
+        path.write_text(
+            '{"series": {}, "retention": {"": {"max_age_seconds": 86400000000000.0}}}',
+            encoding="utf-8",
+        )
+        with pytest.raises(PersistenceError, match=r"db\.json"):
+            load(path)
+
+    def test_zero_retention_raises_persistence_error(self, tmp_path: Path) -> None:
+        """A retention period of zero used to escape as InvalidRetentionError."""
+        path = tmp_path / "db.json"
+        path.write_text(
+            '{"series": {}, "retention": {"": {"max_age_seconds": false}}}', encoding="utf-8"
+        )
+        with pytest.raises(PersistenceError, match=r"db\.json"):
+            load(path)
+
+    def test_reading_too_big_for_a_float_raises_persistence_error(self, tmp_path: Path) -> None:
+        """A 400-digit reading used to escape as OverflowError."""
+        path = tmp_path / "db.json"
+        point = '{"timestamp": "2024-07-04T10:00:00+00:00", "value": 1' + "0" * 400 + "}"
+        path.write_text(
+            '{"series": {"t": {"name": "t", "points": [' + point + "]}}}", encoding="utf-8"
+        )
+        with pytest.raises(PersistenceError, match=r"db\.json"):
+            load(path)
+
+    def test_retention_for_a_missing_series_raises_persistence_error(self, tmp_path: Path) -> None:
+        """A retention rule for a series not in the file used to load, then crash apply_retention."""
+        path = tmp_path / "db.json"
+        path.write_text(
+            '{"series": {}, "retention": {"": {"max_age_seconds": 1.0}}}', encoding="utf-8"
+        )
+        with pytest.raises(PersistenceError, match=r"db\.json"):
+            load(path)
+
+    def test_two_series_with_the_same_name_raise_persistence_error(self, tmp_path: Path) -> None:
+        """Two series saved under one name used to load as one, losing the other's readings."""
+        path = tmp_path / "db.json"
+        path.write_text(
+            '{"series": {"a": {"name": "t", "points": []}, "b": {"name": "t", "points": []}}}',
+            encoding="utf-8",
+        )
+        with pytest.raises(PersistenceError, match=r"db\.json"):
+            load(path)
+
+    def test_nan_reading_raises_persistence_error(self, tmp_path: Path) -> None:
+        """A NaN reading in a save file is refused, just like one added by hand."""
+        path = tmp_path / "db.json"
+        point = '{"timestamp": "2024-07-04T10:00:00+00:00", "value": NaN}'
+        path.write_text(
+            '{"series": {"t": {"name": "t", "points": [' + point + "]}}}", encoding="utf-8"
+        )
+        with pytest.raises(PersistenceError, match=r"db\.json"):
+            load(path)

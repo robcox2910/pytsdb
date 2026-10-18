@@ -48,6 +48,7 @@ nav:
   - "Retention -- Throwing Away Last Year's Newspapers": concepts/retention.md
   - Saving Safely -- Never Half a File: concepts/saving-safely.md
   - Time Series -- A Week of Readings: concepts/series.md
+  - Property Testing -- No Reading Left Behind: property-testing.md
   # series-nav:start
   - The series:
       - Series home: https://robcox2910.github.io/

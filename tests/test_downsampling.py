@@ -70,3 +70,45 @@ class TestDownsample:
         pts = _sample_points()
         with pytest.raises(InvalidWindowError):
             downsample(pts, target_interval=timedelta(hours=-1))
+
+
+def test_reading_on_a_bucket_boundary_starts_its_own_bucket() -> None:
+    """Regression: float rounding used to put a boundary reading in the bucket before it.
+
+    Found by test_each_bucket_holds_exactly_the_readings_in_its_window. The
+    bucket was labelled 23:59:59.999875, so it ended just *before* the reading.
+    """
+    midnight = datetime(2000, 1, 1, tzinfo=UTC)
+    result = downsample(
+        [DataPoint(timestamp=midnight, value=VALUE_10)], target_interval=timedelta(microseconds=125)
+    )
+    assert [bucket.timestamp for bucket in result] == [midnight]
+
+
+def test_bucket_before_year_one_is_refused_with_invalid_window_error() -> None:
+    """Regression: a bucket starting before year 1 used to crash with OverflowError.
+
+    Found by test_downsampling_keeps_every_reading_exactly_once. Buckets line up
+    with 1970-01-01, so this reading's bucket would start just before
+    0001-01-01, which a datetime can't hold.
+    """
+    first_moment = datetime(1, 1, 1, tzinfo=UTC)
+    with pytest.raises(InvalidWindowError, match="before year 1"):
+        downsample(
+            [DataPoint(timestamp=first_moment, value=VALUE_10)],
+            target_interval=timedelta(seconds=1, microseconds=1),
+        )
+
+
+def test_one_microsecond_window_puts_a_reading_in_its_own_bucket() -> None:
+    """Regression: the exact shrunk input from the property test, shown in the docs.
+
+    A reading one microsecond after midnight, in one-microsecond buckets,
+    used to get a bucket labelled midnight, which ends before the reading.
+    """
+    just_after_midnight = datetime(2000, 1, 1, 0, 0, 0, 1, tzinfo=UTC)
+    result = downsample(
+        [DataPoint(timestamp=just_after_midnight, value=VALUE_10)],
+        target_interval=timedelta(microseconds=1),
+    )
+    assert [bucket.timestamp for bucket in result] == [just_after_midnight]

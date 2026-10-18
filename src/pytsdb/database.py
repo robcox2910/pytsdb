@@ -311,6 +311,11 @@ class TimeSeriesDB:
         Returns:
             A new ``TimeSeriesDB`` instance.
 
+        Raises:
+            TypeError: If a part of *data* has the wrong type.
+            ValueError: If two series share a name, or a retention rule
+                names a series that isn't there.
+
         """
         db = cls()
         raw_series = data.get("series", {})
@@ -323,6 +328,9 @@ class TimeSeriesDB:
                 raise TypeError(msg)
             s_data: dict[str, object] = {str(k): v for k, v in raw_s.items()}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
             series = TimeSeries.from_dict(s_data)
+            if series.name in db._series:
+                msg = f"two series are both named {series.name!r}"
+                raise ValueError(msg)
             db._series[series.name] = series
 
         raw_retention = data.get("retention", {})
@@ -334,6 +342,9 @@ class TimeSeriesDB:
                 msg = "each retention policy must be a dict"
                 raise TypeError(msg)
             p_data: dict[str, object] = {str(k): v for k, v in raw_policy.items()}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+            if str(name) not in db._series:  # pyright: ignore[reportUnknownArgumentType]
+                msg = f"retention rule for {str(name)!r}, which isn't a series"  # pyright: ignore[reportUnknownArgumentType]
+                raise ValueError(msg)
             db._retention[str(name)] = RetentionPolicy.from_dict(p_data)  # pyright: ignore[reportUnknownArgumentType]
 
         return db

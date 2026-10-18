@@ -81,3 +81,14 @@ class TestRetentionSerialization:
         """Raise TypeError if max_age_seconds is not numeric."""
         with pytest.raises(TypeError, match="max_age_seconds"):
             RetentionPolicy.from_dict({"max_age_seconds": "bad"})
+
+
+def test_retention_longer_than_the_calendar_keeps_everything() -> None:
+    """Regression: a cutoff before year 1 used to crash with OverflowError.
+
+    Found by the model check: keeping 2,000 years of readings, applied in the
+    year 2000, asked for a cutoff before 0001-01-01, which datetime can't hold.
+    """
+    policy = RetentionPolicy(max_age=timedelta(days=730119, microseconds=1))
+    points = [DataPoint(timestamp=datetime(1, 1, 1, tzinfo=UTC), value=VALUE_A)]
+    assert policy.apply(points, now=datetime(2000, 1, 1, tzinfo=UTC)) == points

@@ -36,7 +36,9 @@ def downsample(
         A new list of data points at the lower resolution.
 
     Raises:
-        InvalidWindowError: If *target_interval* is zero or negative.
+        InvalidWindowError: If *target_interval* is zero or negative, or
+            if a point's bucket would start before year 1 (see
+            :func:`~pytsdb.aggregation.aggregate`).
 
     """
     if target_interval.total_seconds() <= 0:

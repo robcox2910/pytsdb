@@ -50,6 +50,8 @@ labels["sensor"] = "garage"   # edit the original dict
 print(reading.tags)           # {'sensor': 'kitchen'}  -- still in pen!
 ```
 
+A series works the same way in the other direction. Every point it hands back -- from `query`, `first`, `last` or looping over it -- is a fresh copy, so scribbling on a returned point's tags can't change what the database has stored.
+
 ## Watch Out: Timestamps Need a Timezone
 
 A data point's timestamp must be **timezone-aware** so pytsdb always knows *which* clock you mean. A bare `datetime(2024, 1, 1)` has no timezone, so pytsdb raises a friendly error instead of letting it cause confusing crashes later:
@@ -59,4 +61,13 @@ from datetime import datetime, timezone
 
 DataPoint(timestamp=datetime(2024, 1, 1))                       # ValueError!
 DataPoint(timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc))  # works
+```
+
+## Watch Out: NaN Isn't a Reading
+
+`float("nan")` means "not a number". It isn't bigger, smaller or equal to anything -- not even itself -- so a NaN reading would make "the highest reading" and "in time order" meaningless. pytsdb refuses it with a `ValueError`. Infinity is fine.
+
+```python
+DataPoint(value=float("nan"))  # ValueError!
+DataPoint(value=float("inf"))  # works
 ```
