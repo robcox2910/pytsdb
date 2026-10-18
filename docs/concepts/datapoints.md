@@ -65,7 +65,7 @@ DataPoint(timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc))  # works
 
 ## Watch Out: NaN Isn't a Reading
 
-`float("nan")` means "not a number". It isn't bigger, smaller or equal to anything -- not even itself -- so a NaN reading would make "the highest reading" and "in time order" meaningless. pytsdb refuses it with a `ValueError`. Infinity is fine.
+`float("nan")` means "not a number". It isn't bigger, smaller or equal to anything -- not even itself -- so a NaN reading would make "the highest reading" and "in time order" meaningless. pytsdb refuses it with a `ValueError`. So is anything that isn't a real number (a string, `None`, `True`). Infinity is fine.
 
 ```python
 DataPoint(value=float("nan"))  # ValueError!

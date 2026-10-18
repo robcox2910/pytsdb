@@ -151,3 +151,17 @@ class TestNotANumber:
         """Plus and minus infinity are still fine: they sort like any other number."""
         assert DataPoint(timestamp=_make_ts(), value=float("inf")).value == float("inf")
         assert DataPoint(timestamp=_make_ts(), value=float("-inf")).value == float("-inf")
+
+
+class TestNonNumericValue:
+    """Regression: ``DataPoint(value="x")`` escaped as a TypeError from ``math.isnan``."""
+
+    @pytest.mark.parametrize("bad", ["x", "1.5", None, b"1", [1.0], True, False])
+    def test_non_number_value_rejected(self, bad: object) -> None:
+        """A value that is not a real number raises a clear ValueError."""
+        with pytest.raises(ValueError, match="value must be a number"):
+            DataPoint(timestamp=_make_ts(), value=bad)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+
+    def test_int_value_still_allowed(self) -> None:
+        """Whole numbers are real numbers and stay accepted."""
+        assert DataPoint(timestamp=_make_ts(), value=3).value == 3  # noqa: PLR2004
