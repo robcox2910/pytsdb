@@ -98,3 +98,17 @@ def test_bucket_before_year_one_is_refused_with_invalid_window_error() -> None:
             [DataPoint(timestamp=first_moment, value=VALUE_10)],
             target_interval=timedelta(seconds=1, microseconds=1),
         )
+
+
+def test_one_microsecond_window_puts_a_reading_in_its_own_bucket() -> None:
+    """Regression: the exact shrunk input from the property test, shown in the docs.
+
+    A reading one microsecond after midnight, in one-microsecond buckets,
+    used to get a bucket labelled midnight, which ends before the reading.
+    """
+    just_after_midnight = datetime(2000, 1, 1, 0, 0, 0, 1, tzinfo=UTC)
+    result = downsample(
+        [DataPoint(timestamp=just_after_midnight, value=VALUE_10)],
+        target_interval=timedelta(microseconds=1),
+    )
+    assert [bucket.timestamp for bucket in result] == [just_after_midnight]

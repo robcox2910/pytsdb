@@ -11,8 +11,8 @@ Each test below says its rule in plain English in its docstring. The
 strategies at the top are recipes for making random inputs; each one is
 named for what it makes.
 
-The step-by-step check of ``TimeSeriesDB`` against a plain sorted list
-lives in ``tests/test_model.py``. See ``docs/property-testing.md`` for the
+The step-by-step check of ``TimeSeriesDB`` against a dict of plain,
+unsorted lists lives in ``tests/test_model.py``. See ``docs/property-testing.md`` for the
 walk-through.
 """
 
@@ -34,6 +34,12 @@ from tests.strategies import durations, readings, tag_sets, timestamps
 
 # The very first moment a datetime can hold: midnight, 1 January, year 1.
 FIRST_MOMENT = datetime.min.replace(tzinfo=UTC)
+
+# Buckets line up with midnight on 1 January 1970, as ``aggregate`` documents.
+EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+# A "now" in the middle of the calendar, so loaded retention rules really filter.
+MIDSUMMER_2024 = datetime(2024, 7, 4, tzinfo=UTC)
 
 # A reading is (when, what value, which labels).
 type Reading = tuple[datetime, float, dict[str, str]]
@@ -207,7 +213,7 @@ def test_downsampling_keeps_every_reading_exactly_once(
 def test_each_bucket_holds_exactly_the_readings_in_its_window(
     logbook: list[tuple[datetime, float]], window: timedelta
 ) -> None:
-    """Each bucket counts and adds up exactly the readings from its start to just before the next."""
+    """Each bucket starts a whole number of windows after 1970 and holds exactly the readings up to the next."""
     downsampled = counts_and_sums(logbook, window)
     if downsampled is None:
         return  # refused for the one documented reason: see counts_and_sums
@@ -217,6 +223,7 @@ def test_each_bucket_holds_exactly_the_readings_in_its_window(
     assert [bucket.timestamp for bucket in counts] == [bucket.timestamp for bucket in sums]
     for count, total in zip(counts, sums, strict=True):
         start = count.timestamp
+        assert (start - EPOCH) % window == timedelta(0)  # a whole number of windows after 1970
         # ``timestamp - start < window`` rather than ``timestamp < start + window``,
         # because ``start + window`` can run off the end of the calendar (year 9999).
         inside = [
@@ -273,4 +280,5 @@ def test_damaged_save_file_load_or_raise_persistence_error(document: dict[str, o
         # the file (none lost to a clash of names), and every retention rule
         # belongs to a series, so applying them all works.
         assert loaded.series_count == len(cast("dict[str, object]", document["series"]))
+        loaded.apply_retention(now=MIDSUMMER_2024)
         loaded.apply_retention(now=FIRST_MOMENT)

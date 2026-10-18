@@ -10,13 +10,18 @@ once:
 - a **model**: a dict of plain Python lists, one unsorted list of
   ``(timestamp, value, tags)`` per series, which we already trust.
 
+Every read the database offers is checked against the notebook: queries
+by time and by label, ``first``/``last``, looping over a series, rate of
+change, windowed aggregates, ``list_series`` and asking for a series that
+isn't there.
+
 After every step the two must agree. If they ever disagree, Hypothesis
 shrinks the story to the shortest list of steps that still goes wrong.
 
 The model is deliberately *not* a copy of ``TimeSeriesDB``'s code. It
 never sorts anything as it goes and never uses binary search: it keeps
 readings in the order they arrived and, when asked a question, simply
-looks at every one. So when the two disagree, the database is the one to
+looks at every one (sorting with ``sorted()`` only to answer "oldest first"). So when the two disagree, the database is the one to
 suspect.
 
 Retention ("throw out readings older than 30 days") normally reads the
@@ -28,8 +33,8 @@ See ``docs/property-testing.md`` for the walk-through.
 """
 
 import unittest
-from collections import Counter
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from typing import cast
 
 import pytest
@@ -45,13 +50,24 @@ from hypothesis.stateful import (
     rule,
 )
 
+from pytsdb.aggregation import AggFunc
 from pytsdb.database import TimeSeriesDB
 from pytsdb.datapoint import DataPoint
-from pytsdb.errors import DuplicateSeriesError, EmptySeriesError, SeriesNotFoundError
+from pytsdb.errors import (
+    DuplicateSeriesError,
+    EmptySeriesError,
+    InvalidWindowError,
+    SeriesNotFoundError,
+)
 from tests.strategies import durations, readings, tag_sets, timestamps
 
-# The very last moment a datetime can hold: just before midnight, 31 December 9999.
+# The very first and last moments a datetime can hold: midnight on
+# 1 January of year 1, and just before midnight on 31 December 9999.
+FIRST_MOMENT = datetime.min.replace(tzinfo=UTC)
 LAST_MOMENT = datetime.max.replace(tzinfo=UTC)
+
+# Buckets line up with midnight on 1 January 1970, as ``aggregate`` documents.
+EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 # A reading is (when, what value, which labels).
 type Reading = tuple[datetime, float, dict[str, str]]
@@ -70,6 +86,11 @@ def moments() -> st.SearchStrategy[datetime]:
     return st.one_of(early_morning_hours(), timestamps())
 
 
+def maybe_moments() -> st.SearchStrategy[datetime | None]:
+    """Make a moment, or None for "no limit"."""
+    return st.one_of(st.none(), moments())
+
+
 def whole_hours() -> st.SearchStrategy[timedelta]:
     """Make a length of time from 1 to 5 whole hours."""
     return st.builds(timedelta, hours=st.integers(min_value=1, max_value=5))
@@ -78,6 +99,18 @@ def whole_hours() -> st.SearchStrategy[timedelta]:
 def lengths_of_time() -> st.SearchStrategy[timedelta]:
     """Make a length of time that's often whole hours, and sometimes any positive length."""
     return st.one_of(whole_hours(), durations())
+
+
+def room_labels() -> st.SearchStrategy[dict[str, str]]:
+    """Make up to two labels from a tiny choice, like ``{"room": "hall"}``, so filters often match."""
+    return st.dictionaries(
+        st.sampled_from(["room", "floor"]), st.sampled_from(["hall", "1"]), max_size=2
+    )
+
+
+def labels() -> st.SearchStrategy[dict[str, str]]:
+    """Make labels that are often from the tiny choice, and sometimes any labels at all."""
+    return st.one_of(room_labels(), tag_sets())
 
 
 def some_names() -> st.SearchStrategy[str]:
@@ -89,7 +122,7 @@ def some_names() -> st.SearchStrategy[str]:
 
 def batches_of_readings() -> st.SearchStrategy[list[Reading]]:
     """Make one to five readings, in no particular order."""
-    return st.lists(st.tuples(moments(), readings(), tag_sets()), min_size=1, max_size=5)
+    return st.lists(st.tuples(moments(), readings(), labels()), min_size=1, max_size=5)
 
 
 def as_readings(points: list[DataPoint]) -> list[Reading]:
@@ -97,12 +130,16 @@ def as_readings(points: list[DataPoint]) -> list[Reading]:
     return [(p.timestamp, p.value, p.tags) for p in points]
 
 
-def same_readings_in_time_order(got: list[Reading], expected: list[Reading]) -> bool:
-    """Say whether ``got`` holds exactly the ``expected`` readings, oldest first."""
-    oldest_first = [timestamp for timestamp, _, _ in got] == sorted(t for t, _, _ in expected)
-    # ``repr`` tells 1 from 1.0, and lets a NaN reading match itself.
-    same_pile = Counter(map(repr, got)) == Counter(map(repr, expected))
-    return oldest_first and same_pile
+def oldest_first(notebook: list[Reading]) -> list[Reading]:
+    """Return the readings oldest first; ones from the same moment stay in arrival order."""
+    # ``sorted`` never swaps two readings it thinks are equal, so readings
+    # from the same moment keep the order they were written in.
+    return sorted(notebook, key=lambda reading: reading[0])
+
+
+def same(got: object, expected: object) -> bool:
+    """Say whether two answers are exactly the same, down to 1 versus 1.0 and -0.0 versus 0.0."""
+    return repr(got) == repr(expected)
 
 
 # --- The machine: one story, played on the database and on plain lists -------
@@ -153,34 +190,110 @@ class TimeSeriesDBMachine(RuleBasedStateMachine):
 
     @rule(target=seen, name=some_names(), batch=batches_of_readings())
     def add_readings(self, name: str, batch: list[Reading]) -> MultipleResults[datetime]:
-        """Add a few readings from any moments, in any order; the notebook adds them to its end."""
+        """Add a few readings, in any order; the notebook adds them to its end."""
         for timestamp, value, tags in batch:
+            handed_in = dict(tags)
             if name in self.model:
-                self.db.add_point(name, value=value, timestamp=timestamp, tags=tags)
-                self.model[name].append((timestamp, value, tags))
+                added = self.db.add_point(name, value=value, timestamp=timestamp, tags=handed_in)
+                self.model[name].append((timestamp, value, dict(tags)))
+                # Scribble on the labels we handed in and on the point we got
+                # back: neither may change what the database stored.
+                handed_in["scribble"] = "!"
+                added.tags["scribble"] = "!"
             else:
                 with pytest.raises(SeriesNotFoundError):
-                    self.db.add_point(name, value=value, timestamp=timestamp, tags=tags)
+                    self.db.add_point(name, value=value, timestamp=timestamp, tags=handed_in)
         return multiple(*(timestamp for timestamp, _, _ in batch))
 
     @rule(
         name=some_names(),
         start=st.one_of(st.none(), seen, moments()),
         end=st.one_of(st.none(), seen, moments()),
+        tags=st.one_of(st.none(), room_labels()),
     )
-    def query_range(self, name: str, start: datetime | None, end: datetime | None) -> None:
-        """Ask for the readings from start to end (both included, None = no limit), and get exactly those."""
+    def query(
+        self,
+        name: str,
+        start: datetime | None,
+        end: datetime | None,
+        tags: dict[str, str] | None,
+    ) -> None:
+        """Ask for readings from start to end (both included) with these labels; get exactly those."""
         if name not in self.model:
             with pytest.raises(SeriesNotFoundError):
-                self.db.query(name, start=start, end=end)
+                self.db.query(name, start=start, end=end, tags=tags)
+            with pytest.raises(SeriesNotFoundError):
+                self.db.get_series(name)
             return
         expected = [
             reading
-            for reading in self.model[name]
-            if (start is None or start <= reading[0]) and (end is None or reading[0] <= end)
+            for reading in oldest_first(self.model[name])
+            if (start is None or start <= reading[0])
+            and (end is None or reading[0] <= end)
+            and (tags is None or tags.items() <= reading[2].items())
         ]
-        got = as_readings(self.db.query(name, start=start, end=end))
-        assert same_readings_in_time_order(got, expected)
+        got = as_readings(self.db.query(name, start=start, end=end, tags=tags))
+        assert same(got, expected)
+
+    @rule(name=some_names())
+    def scribble_on_answers(self, name: str) -> None:
+        """Scribble on the labels of every point we're handed; the database must not change."""
+        if name not in self.model:
+            return
+        series = self.db.get_series(name)
+        handed_out = [*self.db.query(name), *series, *series.points]
+        if self.model[name]:
+            handed_out += [series.first, series.last]
+        for point in handed_out:
+            point.tags["scribble"] = "!"
+
+    @rule(name=some_names())
+    def rate_of_change(self, name: str) -> None:
+        """Each rate is the change in value per second between neighbours at different moments."""
+        if name not in self.model:
+            with pytest.raises(SeriesNotFoundError):
+                self.db.rate_of_change(name)
+            return
+        ordered = oldest_first(self.model[name])
+        expected = [
+            (later[0], (later[1] - earlier[1]) / (later[0] - earlier[0]).total_seconds())
+            for earlier, later in pairwise(ordered)
+            if later[0] != earlier[0]
+        ]
+        got = [(p.timestamp, p.value) for p in self.db.rate_of_change(name)]
+        assert same(got, expected)
+
+    @rule(name=some_names(), window=lengths_of_time(), start=maybe_moments(), end=maybe_moments())
+    def aggregate(
+        self, name: str, window: timedelta, start: datetime | None, end: datetime | None
+    ) -> None:
+        """Count and take the biggest reading per window, for readings from start to end."""
+        if name not in self.model:
+            with pytest.raises(SeriesNotFoundError):
+                self.db.aggregate(name, window, AggFunc.COUNT, start=start, end=end)
+            return
+        # Oldest first, so that of two equal biggest readings (like 0.0 and
+        # -0.0) the one that comes first in time is the one we expect.
+        in_range = [
+            (timestamp, value)
+            for timestamp, value, _ in oldest_first(self.model[name])
+            if (start is None or start <= timestamp) and (end is None or timestamp <= end)
+        ]
+        try:
+            counts = self.db.aggregate(name, window, AggFunc.COUNT, start=start, end=end)
+            biggest = self.db.aggregate(name, window, AggFunc.MAX, start=start, end=end)
+        except InvalidWindowError:
+            # The one documented refusal: a bucket that would start before year 1.
+            assert min(timestamp for timestamp, _ in in_range) - FIRST_MOMENT < window
+            return
+        assert sum(bucket.value for bucket in counts) == len(in_range)
+        assert [b.timestamp for b in counts] == [b.timestamp for b in biggest]
+        for count, top in zip(counts, biggest, strict=True):
+            start_of_bucket = count.timestamp
+            assert (start_of_bucket - EPOCH) % window == timedelta(0)
+            inside = [v for t, v in in_range if timedelta(0) <= t - start_of_bucket < window]
+            assert count.value == len(inside)
+            assert same(top.value, max(inside))
 
     @rule(name=some_names(), max_age=lengths_of_time())
     def set_retention(self, name: str, max_age: timedelta) -> None:
@@ -204,12 +317,12 @@ class TimeSeriesDBMachine(RuleBasedStateMachine):
             self.model[name] = kept
         assert self.db.apply_retention(now=now) == removed
 
-    @rule(name=some_names(), moment=seen)
-    def apply_retention_on_the_dot(self, name: str, moment: datetime) -> None:
-        """Throw out old readings at the very instant a reading from ``moment`` is exactly max_age old."""
-        max_age = self.max_ages.get(name)
-        if max_age is None or LAST_MOMENT - moment < max_age:
-            return  # no rule, or that instant would be after year 9999
+    @rule(name=some_names(), max_age=lengths_of_time(), moment=seen)
+    def apply_retention_on_the_dot(self, name: str, max_age: timedelta, moment: datetime) -> None:
+        """Set a retention rule, then apply it at the instant a reading from ``moment`` is exactly that old."""
+        if name not in self.model or LAST_MOMENT - moment < max_age:
+            return  # no such series, or that instant would be after year 9999
+        self.set_retention(name, max_age)
         self.apply_retention(now=moment + max_age)
 
     @invariant()
@@ -217,13 +330,14 @@ class TimeSeriesDBMachine(RuleBasedStateMachine):
         """After every step, the database holds exactly the notebook's series and readings."""
         assert self.db.list_series() == sorted(self.model)
         assert self.db.series_count == len(self.model)
-        for name, expected in self.model.items():
+        for name, notebook in self.model.items():
+            expected = oldest_first(notebook)
             series = self.db.get_series(name)
             assert len(series) == len(expected)
-            assert same_readings_in_time_order(as_readings(self.db.query(name)), expected)
+            assert same(as_readings(self.db.query(name)), expected)
+            assert same(as_readings(list(series)), expected)
             if expected:
-                assert series.first.timestamp == min(t for t, _, _ in expected)
-                assert series.last.timestamp == max(t for t, _, _ in expected)
+                assert same(as_readings([series.first, series.last]), [expected[0], expected[-1]])
             else:
                 with pytest.raises(EmptySeriesError):
                     _ = series.first
