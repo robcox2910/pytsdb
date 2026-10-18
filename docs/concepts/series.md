@@ -4,7 +4,7 @@
 
 If a data point is one thermometer reading, a **time series** is an entire page in your logbook -- a whole week (or month, or year!) of readings for one thing you're measuring.
 
-The series has a **name** (like "kitchen_temperature") and keeps all its data points sorted by time, oldest first. It's like keeping your diary entries in date order so you can quickly flip to any day.
+The series has a **name** (like "kitchen_temperature") and keeps all its data points sorted by time, oldest first. Two readings taken at the same moment stay in the order you added them. It's like keeping your diary entries in date order so you can quickly flip to any day.
 
 ## In Code
 

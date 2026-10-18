@@ -25,6 +25,11 @@ def _copy(point: DataPoint) -> DataPoint:
     return replace(point)  # DataPoint.__post_init__ copies the tags
 
 
+def _when(point: DataPoint) -> datetime:
+    """Return when *point* was taken: the only thing a series sorts by."""
+    return point.timestamp
+
+
 class TimeSeries:
     """An ordered collection of :class:`DataPoint` objects for one metric.
 
@@ -66,13 +71,15 @@ class TimeSeries:
         """Insert a copy of a data point, keeping chronological order.
 
         Uses binary search (like flipping to the right page in a sorted
-        notebook) so it stays fast even with millions of points.
+        notebook) so it stays fast even with millions of points. Points
+        are ordered by timestamp only: readings taken at the same moment
+        stay in the order they were added.
 
         Args:
             point: The data point to add.
 
         """
-        bisect.insort(self._points, _copy(point))
+        bisect.insort(self._points, _copy(point), key=_when)
 
     def add_value(
         self,
