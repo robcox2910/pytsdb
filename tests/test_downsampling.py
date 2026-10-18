@@ -70,3 +70,16 @@ class TestDownsample:
         pts = _sample_points()
         with pytest.raises(InvalidWindowError):
             downsample(pts, target_interval=timedelta(hours=-1))
+
+
+def test_reading_on_a_bucket_boundary_starts_its_own_bucket() -> None:
+    """Regression: float rounding used to put a boundary reading in the bucket before it.
+
+    Found by test_each_bucket_holds_exactly_the_readings_in_its_window. The
+    bucket was labelled 23:59:59.999875, so it ended just *before* the reading.
+    """
+    midnight = datetime(2000, 1, 1, tzinfo=UTC)
+    result = downsample(
+        [DataPoint(timestamp=midnight, value=VALUE_10)], target_interval=timedelta(microseconds=125)
+    )
+    assert [bucket.timestamp for bucket in result] == [midnight]

@@ -43,10 +43,12 @@ def _bucket_key(timestamp: datetime, window: timedelta) -> datetime:
 
     """
     epoch = datetime(1970, 1, 1, tzinfo=UTC)
-    total_seconds = (timestamp - epoch).total_seconds()
-    window_seconds = window.total_seconds()
-    bucket_start = int(total_seconds // window_seconds) * window_seconds
-    return epoch + timedelta(seconds=bucket_start)
+    # Count whole windows with timedelta arithmetic, which is exact to the
+    # microsecond. Going through float seconds rounded, and could label a
+    # bucket a hair *after* its first reading -- or put a reading that sits
+    # exactly on a boundary into the bucket before it.
+    windows_since_epoch = (timestamp - epoch) // window
+    return epoch + windows_since_epoch * window
 
 
 def aggregate(
