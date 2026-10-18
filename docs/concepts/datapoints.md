@@ -50,6 +50,8 @@ labels["sensor"] = "garage"   # edit the original dict
 print(reading.tags)           # {'sensor': 'kitchen'}  -- still in pen!
 ```
 
+A series works the same way in the other direction. Every point it hands back -- from `query`, `first`, `last` or looping over it -- is a fresh copy, so scribbling on a returned point's tags can't change what the database has stored.
+
 ## Watch Out: Timestamps Need a Timezone
 
 A data point's timestamp must be **timezone-aware** so pytsdb always knows *which* clock you mean. A bare `datetime(2024, 1, 1)` has no timezone, so pytsdb raises a friendly error instead of letting it cause confusing crashes later:

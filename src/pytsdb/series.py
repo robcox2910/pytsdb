@@ -8,10 +8,21 @@ flip to any date.
 
 import bisect
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import datetime
 
 from pytsdb.datapoint import DataPoint
 from pytsdb.errors import EmptySeriesError
+
+
+def _copy(point: DataPoint) -> DataPoint:
+    """Return a fresh copy of *point*, with its own copy of the tags.
+
+    A frozen point can't be changed, but its tags dict can. The series
+    keeps its points to itself and hands out copies, so scribbling on the
+    tags of a point you were given can never change what's stored.
+    """
+    return replace(point)  # DataPoint.__post_init__ copies the tags
 
 
 class TimeSeries:
@@ -44,15 +55,15 @@ class TimeSeries:
         return len(self._points)
 
     def __iter__(self) -> Iterator[DataPoint]:
-        """Iterate over all data points in chronological order."""
-        return iter(self._points)
+        """Iterate over copies of all data points in chronological order."""
+        return (_copy(point) for point in self._points)
 
     # ------------------------------------------------------------------
     # Write operations
     # ------------------------------------------------------------------
 
     def add(self, point: DataPoint) -> None:
-        """Insert a data point, keeping chronological order.
+        """Insert a copy of a data point, keeping chronological order.
 
         Uses binary search (like flipping to the right page in a sorted
         notebook) so it stays fast even with millions of points.
@@ -61,7 +72,7 @@ class TimeSeries:
             point: The data point to add.
 
         """
-        bisect.insort(self._points, point)
+        bisect.insort(self._points, _copy(point))
 
     def add_value(
         self,
@@ -105,7 +116,7 @@ class TimeSeries:
         if not self._points:
             msg = f"Series '{self.name}' is empty"
             raise EmptySeriesError(msg)
-        return self._points[0]
+        return _copy(self._points[0])
 
     @property
     def last(self) -> DataPoint:
@@ -118,12 +129,12 @@ class TimeSeries:
         if not self._points:
             msg = f"Series '{self.name}' is empty"
             raise EmptySeriesError(msg)
-        return self._points[-1]
+        return _copy(self._points[-1])
 
     @property
     def points(self) -> list[DataPoint]:
-        """Return a shallow copy of all points (chronological order)."""
-        return list(self._points)
+        """Return copies of all points (chronological order)."""
+        return [_copy(point) for point in self._points]
 
     def clear(self) -> None:
         """Remove all data points from this series."""
