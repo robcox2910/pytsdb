@@ -41,6 +41,9 @@ def _bucket_key(timestamp: datetime, window: timedelta) -> datetime:
     Returns:
         A UTC datetime representing the start of the bucket.
 
+    Raises:
+        InvalidWindowError: If the bucket would start before year 1.
+
     """
     epoch = datetime(1970, 1, 1, tzinfo=UTC)
     # Count whole windows with timedelta arithmetic, which is exact to the
@@ -48,7 +51,17 @@ def _bucket_key(timestamp: datetime, window: timedelta) -> datetime:
     # bucket a hair *after* its first reading -- or put a reading that sits
     # exactly on a boundary into the bucket before it.
     windows_since_epoch = (timestamp - epoch) // window
-    return epoch + windows_since_epoch * window
+    try:
+        return epoch + windows_since_epoch * window
+    except OverflowError:
+        # Buckets line up with 1970-01-01, so a reading in the first window
+        # of the calendar can need a bucket starting before 0001-01-01, the
+        # earliest moment a datetime can hold.
+        msg = (
+            f"A {window} window puts the bucket for {timestamp.isoformat()} "
+            "before year 1, which a datetime can't hold -- use a smaller window"
+        )
+        raise InvalidWindowError(msg) from None
 
 
 def aggregate(
@@ -61,6 +74,9 @@ def aggregate(
     Think of it like sorting your marbles into jars by colour
     and then counting how many are in each jar.
 
+    Buckets line up with midnight on 1 January 1970, counting whole
+    windows forwards or backwards from there.
+
     Args:
         points: Sorted data points to aggregate.
         window: The size of each time bucket (e.g. ``timedelta(hours=1)``).
@@ -72,7 +88,9 @@ def aggregate(
 
     Raises:
         EmptySeriesError: If *points* is empty.
-        InvalidWindowError: If *window* is zero or negative.
+        InvalidWindowError: If *window* is zero or negative, or if a
+            point's bucket would start before year 1 (only possible for a
+            point less than one window after 0001-01-01 00:00).
 
     """
     if not points:

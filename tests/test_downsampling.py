@@ -83,3 +83,18 @@ def test_reading_on_a_bucket_boundary_starts_its_own_bucket() -> None:
         [DataPoint(timestamp=midnight, value=VALUE_10)], target_interval=timedelta(microseconds=125)
     )
     assert [bucket.timestamp for bucket in result] == [midnight]
+
+
+def test_bucket_before_year_one_is_refused_with_invalid_window_error() -> None:
+    """Regression: a bucket starting before year 1 used to crash with OverflowError.
+
+    Found by test_downsampling_keeps_every_reading_exactly_once. Buckets line up
+    with 1970-01-01, so this reading's bucket would start just before
+    0001-01-01, which a datetime can't hold.
+    """
+    first_moment = datetime(1, 1, 1, tzinfo=UTC)
+    with pytest.raises(InvalidWindowError, match="before year 1"):
+        downsample(
+            [DataPoint(timestamp=first_moment, value=VALUE_10)],
+            target_interval=timedelta(seconds=1, microseconds=1),
+        )
