@@ -70,6 +70,11 @@ class RetentionPolicy:
     def to_dict(self) -> dict[str, object]:
         """Serialize this policy to a plain dictionary.
 
+        The age is written as seconds in a float, which holds every
+        microsecond exactly only up to 2**33 seconds (about 272 years).
+        A longer retention period may come back from :meth:`from_dict` a
+        microsecond or two different.
+
         Returns:
             A dict with ``max_age_seconds``.
 
