@@ -1,5 +1,5 @@
 [project]
-name = "pytsdb"
+name = "fromscratch-pytsdb"
 dynamic = ["version"]
 description = "An educational time-series database library built from scratch in Python"
 readme = "README.md"
