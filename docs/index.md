@@ -44,3 +44,11 @@ By exploring pytsdb you'll understand:
 6. How to save and load data with JSON serialization
 
 Ready? Head over to the [concepts](concepts/series.md) folder to dive deeper!
+
+## Install
+
+```bash
+pip install fromscratch-pytsdb
+```
+
+Or get the whole series at once with `pip install fromscratch-pystack`. To read the code or run the tests, clone it from [GitHub](https://github.com/robcox2910/pytsdb).
