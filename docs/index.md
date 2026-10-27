@@ -1,4 +1,8 @@
-# What is a Time-Series Database?
+---
+title: "Build your own time-series database in Python"
+---
+
+# PyTSDB: Build your own time-series database in Python
 
 ## The Weather Station Logbook
 
